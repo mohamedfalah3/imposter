@@ -212,7 +212,6 @@ export async function startVoting(roomId) {
 
 // Reset room for new round
 export async function newRound(roomId) {
-  const { word, category } = pickRandomWord()
   const { data: room, error: fetchError } = await supabase
     .from('rooms')
     .select('*')
@@ -221,13 +220,12 @@ export async function newRound(roomId) {
 
   if (fetchError) throw fetchError
 
-  const rStngs = room.settings || { imposters: 1 }
   const eliminated = room.eliminated_players || []
-  const activePlayers = room.players.filter(p => !eliminated.includes(p.id))
-  const rMax = Math.max(1, Math.floor(activePlayers.length / 2))
-  const rCount = Math.min(rStngs.imposters || 1, rMax)
-  const rShuffled = [...activePlayers].sort(() => Math.random() - 0.5)
-  const rImposterIds = rShuffled.slice(0, rCount).map(p => p.id)
+
+  // Keep the same word and imposters across rounds
+  const word = room.word
+  const category = room.category
+  const rImposterIds = room.imposter_ids?.length ? room.imposter_ids : (room.imposter_id ? [room.imposter_id] : [])
 
   // Pick a random starting player among active (non-eliminated) players
   const activeIndices = room.players
