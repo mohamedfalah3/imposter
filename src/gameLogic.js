@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient'
-import wordCategories from './wordList'
+import wordList from './wordList'
 
 // Generate a random 6-character room code
 export function generateRoomCode() {
@@ -13,14 +13,12 @@ export function generateRoomCode() {
   return code
 }
 
-// Pick a random word and category
+// Pick a random word
 export function pickRandomWord() {
-  const catIndex = Math.floor(Math.random() * wordCategories.length)
-  const category = wordCategories[catIndex]
-  const wordIndex = Math.floor(Math.random() * category.words.length)
+  const wordIndex = Math.floor(Math.random() * wordList.length)
   return {
-    category: category.category,
-    word: category.words[wordIndex]
+    category: '',
+    word: wordList[wordIndex]
   }
 }
 
@@ -94,10 +92,14 @@ export async function startGame(roomId) {
   const shuffled = [...room.players].sort(() => Math.random() - 0.5)
   const imposterIds = shuffled.slice(0, impCount).map(p => p.id)
 
+  // Shuffle players so turn order is random (not always starting from host)
+  const shuffledPlayers = [...room.players].sort(() => Math.random() - 0.5)
+
   const { data, error } = await supabase
     .from('rooms')
     .update({
       status: 'playing',
+      players: shuffledPlayers,
       imposter_id: imposterIds[0],
       imposter_ids: imposterIds,
       word: word,
@@ -227,11 +229,11 @@ export async function newRound(roomId) {
   const rShuffled = [...activePlayers].sort(() => Math.random() - 0.5)
   const rImposterIds = rShuffled.slice(0, rCount).map(p => p.id)
 
-  // Start at first non-eliminated player
-  let startIndex = 0
-  while (startIndex < room.players.length && eliminated.includes(room.players[startIndex]?.id)) {
-    startIndex++
-  }
+  // Pick a random starting player among active (non-eliminated) players
+  const activeIndices = room.players
+    .map((p, i) => i)
+    .filter(i => !eliminated.includes(room.players[i].id))
+  const startIndex = activeIndices[Math.floor(Math.random() * activeIndices.length)]
 
   const { data, error } = await supabase
     .from('rooms')
