@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { SpeedInsights } from '@vercel/speed-insights/react'
 import Home from './components/Home'
 import Lobby from './components/Lobby'
 import GameRoom from './components/GameRoom'
@@ -55,6 +56,7 @@ export default function App() {
           />
         )}
       </div>
+      <SpeedInsights />
     </div>
   )
 }
