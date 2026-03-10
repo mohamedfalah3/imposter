@@ -227,16 +227,20 @@ export async function newRound(roomId) {
   const category = room.category
   const rImposterIds = room.imposter_ids?.length ? room.imposter_ids : (room.imposter_id ? [room.imposter_id] : [])
 
-  // Pick a random starting player among active (non-eliminated) players
-  const activeIndices = room.players
-    .map((p, i) => i)
-    .filter(i => !eliminated.includes(room.players[i].id))
-  const startIndex = activeIndices[Math.floor(Math.random() * activeIndices.length)]
+  // Reshuffle players so turn order is random each round
+  const shuffledPlayers = [...room.players].sort(() => Math.random() - 0.5)
+
+  // Find the first non-eliminated player index to start from
+  let startIndex = 0
+  while (startIndex < shuffledPlayers.length && eliminated.includes(shuffledPlayers[startIndex].id)) {
+    startIndex++
+  }
 
   const { data, error } = await supabase
     .from('rooms')
     .update({
       status: 'playing',
+      players: shuffledPlayers,
       word: word,
       category: category,
       imposter_id: rImposterIds[0],
