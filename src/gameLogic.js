@@ -37,8 +37,11 @@ export async function createRoom(hostName) {
     status: 'waiting', // waiting, playing, voting, results
     players: [{ name: hostName, id: crypto.randomUUID(), isHost: true }],
     imposter_id: null,
+    imposter_ids: [],
     votes: {},
-    round: 0
+    round: 0,
+    eliminated_players: [],
+    settings: { imposters: 1, rounds: 3, turnTime: 30, voteTime: 60 }
   }).select().single()
 
   if (error) throw error
@@ -85,14 +88,18 @@ export async function startGame(roomId) {
   if (room.players.length < 3) throw new Error('Need at least 3 players')
 
   const { word, category } = pickRandomWord()
-  const imposterIndex = Math.floor(Math.random() * room.players.length)
-  const imposterId = room.players[imposterIndex].id
+  const stngs = room.settings || { imposters: 1 }
+  const maxImp = Math.max(1, Math.floor(room.players.length / 2))
+  const impCount = Math.min(stngs.imposters || 1, maxImp)
+  const shuffled = [...room.players].sort(() => Math.random() - 0.5)
+  const imposterIds = shuffled.slice(0, impCount).map(p => p.id)
 
   const { data, error } = await supabase
     .from('rooms')
     .update({
       status: 'playing',
-      imposter_id: imposterId,
+      imposter_id: imposterIds[0],
+      imposter_ids: imposterIds,
       word: word,
       category: category,
       votes: {},
@@ -119,16 +126,22 @@ export async function submitWord(roomId, playerId, wordInput) {
   if (fetchError) throw fetchError
 
   const submissions = { ...(room.word_submissions || {}), [playerId]: wordInput }
-  const nextIndex = (room.current_turn_index || 0) + 1
-  const allSubmitted = nextIndex >= room.players.length
+  const eliminated = room.eliminated_players || []
+  const activePlayers = room.players.filter(p => !eliminated.includes(p.id))
+  const allSubmitted = activePlayers.every(p => submissions[p.id])
+
+  // Advance turn index, skipping eliminated players
+  let nextIndex = (room.current_turn_index || 0) + 1
+  while (nextIndex < room.players.length && eliminated.includes(room.players[nextIndex]?.id)) {
+    nextIndex++
+  }
 
   const { data, error } = await supabase
     .from('rooms')
     .update({
       word_submissions: submissions,
       current_turn_index: nextIndex,
-      status: allSubmitted ? 'voting' : 'playing',
-      ...(allSubmitted ? { votes: {} } : {})
+      status: allSubmitted ? 'reviewing' : 'playing',
     })
     .eq('id', roomId)
     .select()
@@ -149,12 +162,29 @@ export async function castVote(roomId, voterId, suspectId) {
   if (fetchError) throw fetchError
 
   const votes = { ...room.votes, [voterId]: suspectId }
-  const allVoted = room.players.every(p => votes[p.id])
+  const eliminated = room.eliminated_players || []
+  const activePlayers = room.players.filter(p => !eliminated.includes(p.id))
+  const allVoted = activePlayers.every(p => votes[p.id])
+
+  // Compute elimination when all votes are in
+  let eliminated_players = [...(room.eliminated_players || [])]
+  if (allVoted) {
+    const vCounts = {}
+    room.players.forEach(p => { vCounts[p.id] = 0 })
+    Object.values(votes).forEach(v => { if (v !== 'skip' && vCounts[v] !== undefined) vCounts[v]++ })
+    let maxV = 0, topId = null, tied = false
+    Object.entries(vCounts).forEach(([id, count]) => {
+      if (count > maxV) { maxV = count; topId = id; tied = false }
+      else if (count === maxV && maxV > 0) { tied = true }
+    })
+    if (!tied && topId) eliminated_players.push(topId)
+  }
 
   const { data, error } = await supabase
     .from('rooms')
     .update({
-      votes: votes,
+      votes,
+      eliminated_players,
       status: allVoted ? 'results' : 'voting'
     })
     .eq('id', roomId)
@@ -189,8 +219,19 @@ export async function newRound(roomId) {
 
   if (fetchError) throw fetchError
 
-  const imposterIndex = Math.floor(Math.random() * room.players.length)
-  const imposterId = room.players[imposterIndex].id
+  const rStngs = room.settings || { imposters: 1 }
+  const eliminated = room.eliminated_players || []
+  const activePlayers = room.players.filter(p => !eliminated.includes(p.id))
+  const rMax = Math.max(1, Math.floor(activePlayers.length / 2))
+  const rCount = Math.min(rStngs.imposters || 1, rMax)
+  const rShuffled = [...activePlayers].sort(() => Math.random() - 0.5)
+  const rImposterIds = rShuffled.slice(0, rCount).map(p => p.id)
+
+  // Start at first non-eliminated player
+  let startIndex = 0
+  while (startIndex < room.players.length && eliminated.includes(room.players[startIndex]?.id)) {
+    startIndex++
+  }
 
   const { data, error } = await supabase
     .from('rooms')
@@ -198,16 +239,42 @@ export async function newRound(roomId) {
       status: 'playing',
       word: word,
       category: category,
-      imposter_id: imposterId,
+      imposter_id: rImposterIds[0],
+      imposter_ids: rImposterIds,
       votes: {},
       word_submissions: {},
-      current_turn_index: 0,
+      eliminated_players: eliminated,
+      current_turn_index: startIndex,
       round: room.round + 1
     })
     .eq('id', roomId)
     .select()
     .single()
 
+  if (error) throw error
+  return data
+}
+
+// Update room settings (host only)
+export async function updateSettings(roomId, settings) {
+  const { data, error } = await supabase
+    .from('rooms')
+    .update({ settings })
+    .eq('id', roomId)
+    .select()
+    .single()
+  if (error) throw error
+  return data
+}
+
+// Reset room to waiting state for replay
+export async function resetGame(roomId) {
+  const { data, error } = await supabase
+    .from('rooms')
+    .update({ status: 'waiting', round: 0, votes: {}, word_submissions: {}, imposter_id: null, imposter_ids: [], eliminated_players: [], current_turn_index: 0 })
+    .eq('id', roomId)
+    .select()
+    .single()
   if (error) throw error
   return data
 }

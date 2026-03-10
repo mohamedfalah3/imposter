@@ -26,6 +26,11 @@ export default function App() {
     setScreen('home')
   }
 
+  const handleBackToLobby = (roomData) => {
+    setRoom(roomData)
+    setScreen('lobby')
+  }
+
   return (
     <div className="app">
       <div className="app-bg"></div>
@@ -46,6 +51,7 @@ export default function App() {
             room={room}
             playerId={playerId}
             onLeave={handleLeave}
+            onBackToLobby={handleBackToLobby}
           />
         )}
       </div>
