@@ -13,6 +13,11 @@ export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeav
 
   useEffect(() => {
     const unsubscribe = subscribeToRoom(room.id, (updatedRoom) => {
+      // Detect if this player was kicked
+      if (!updatedRoom.players.find(p => p.id === playerId)) {
+        onLeave()
+        return
+      }
       setRoom(updatedRoom)
       if (updatedRoom.settings) setSettings(updatedRoom.settings)
       if (updatedRoom.status === 'playing') {
@@ -74,6 +79,10 @@ export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeav
     onLeave()
   }
 
+  const handleKick = async (targetId) => {
+    try { await leaveRoom(room.id, targetId) } catch {}
+  }
+
   const handleSettingChange = async (key, value) => {
     const newSettings = { ...settings, [key]: value }
     setSettings(newSettings)
@@ -110,6 +119,15 @@ export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeav
               <span className="player-name">{player.name}</span>
               {player.isHost && <span className="host-badge">Host</span>}
               {player.id === playerId && <span className="me-badge">You</span>}
+              {isHost && player.id !== playerId && (
+                <button
+                  className="kick-btn"
+                  onClick={() => handleKick(player.id)}
+                  title={`Kick ${player.name}`}
+                >
+                  ✕
+                </button>
+              )}
             </div>
           ))}
         </div>
