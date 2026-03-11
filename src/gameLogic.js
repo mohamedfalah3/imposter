@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient'
 import wordList from './wordList'
+import { getWordHint } from './wordList'
 
 // Generate a random 6-character room code
 export function generateRoomCode() {
@@ -16,9 +17,10 @@ export function generateRoomCode() {
 // Pick a random word
 export function pickRandomWord() {
   const wordIndex = Math.floor(Math.random() * wordList.length)
+  const word = wordList[wordIndex]
   return {
-    category: '',
-    word: wordList[wordIndex]
+    category: getWordHint(word),
+    word: word
   }
 }
 
@@ -95,13 +97,6 @@ export async function startGame(roomId) {
   // Shuffle players so turn order is random (not always starting from host)
   const shuffledPlayers = [...room.players].sort(() => Math.random() - 0.5)
 
-  // Find first non-imposter to go first
-  let startIndex = 0
-  while (startIndex < shuffledPlayers.length && imposterIds.includes(shuffledPlayers[startIndex].id)) {
-    startIndex++
-  }
-  if (startIndex >= shuffledPlayers.length) startIndex = 0 // fallback (all imposters, shouldn't happen)
-
   const { data, error } = await supabase
     .from('rooms')
     .update({
@@ -113,7 +108,7 @@ export async function startGame(roomId) {
       category: category,
       votes: {},
       word_submissions: {},
-      current_turn_index: startIndex,
+      current_turn_index: 0,
       round: room.round + 1
     })
     .eq('id', roomId)
@@ -170,6 +165,20 @@ export async function submitWord(roomId, playerId, wordInput) {
       startIdx++
     }
     newTurnIndex = startIdx
+  }
+
+  // Safety: if turn index is out of bounds (e.g. simultaneous auto-submits race condition),
+  // force a phase transition so the game never gets stuck with nobody's turn active
+  if (newStatus === 'playing' && newTurnIndex >= room.players.length) {
+    if (isQuick && newRound < 2) {
+      newRound = newRound + 1
+      newTurnIndex = 0
+      while (newTurnIndex < room.players.length && eliminated.includes(room.players[newTurnIndex]?.id)) {
+        newTurnIndex++
+      }
+    } else {
+      newStatus = 'reviewing'
+    }
   }
 
   const updateData = {
@@ -267,20 +276,10 @@ export async function newRound(roomId) {
   // Reshuffle players so turn order is random each round
   const shuffledPlayers = [...room.players].sort(() => Math.random() - 0.5)
 
-  // Find the first non-eliminated, non-imposter player index to start from
+  // Find the first non-eliminated player index to start from
   let startIndex = 0
-  while (
-    startIndex < shuffledPlayers.length &&
-    (eliminated.includes(shuffledPlayers[startIndex].id) || rImposterIds.includes(shuffledPlayers[startIndex].id))
-  ) {
+  while (startIndex < shuffledPlayers.length && eliminated.includes(shuffledPlayers[startIndex].id)) {
     startIndex++
-  }
-  // Fallback: if all non-eliminated are imposters, just skip eliminated only
-  if (startIndex >= shuffledPlayers.length) {
-    startIndex = 0
-    while (startIndex < shuffledPlayers.length && eliminated.includes(shuffledPlayers[startIndex].id)) {
-      startIndex++
-    }
   }
 
   const { data, error } = await supabase

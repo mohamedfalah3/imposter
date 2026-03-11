@@ -260,6 +260,7 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
             <>
               <div className="word-icon">🕵️</div>
               <h2>You are the Imposter!</h2>
+              {room.category && <p className="word-hint imposter-hint">ئامۆژگاری: <strong>{room.category}</strong></p>}
               <p className="word-hint">Try to figure out the secret word without revealing yourself</p>
             </>
           ) : (
@@ -385,6 +386,7 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
             <>
               <div className="word-icon">🕵️</div>
               <h2>You are the Imposter!</h2>
+              {room.category && <p className="word-hint imposter-hint">ئامۆژگاری: <strong>{room.category}</strong></p>}
               <p className="word-hint">Try to figure out the secret word without revealing yourself</p>
             </>
           ) : (
