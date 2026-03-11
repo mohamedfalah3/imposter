@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { startGame, subscribeToRoom, leaveRoom, updateSettings } from '../gameLogic'
+import { startGame, subscribeToRoom, leaveRoom, updateSettings, fetchRoom } from '../gameLogic'
 
 export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeave }) {
   const [room, setRoom] = useState(initialRoom)
@@ -20,6 +20,23 @@ export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeav
       }
     })
     return unsubscribe
+  }, [room.id])
+
+  // Re-fetch room state when tab becomes visible (handles background disconnects)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchRoom(room.id).then(updatedRoom => {
+          setRoom(updatedRoom)
+          if (updatedRoom.settings) setSettings(updatedRoom.settings)
+          if (updatedRoom.status === 'playing') {
+            onGameStart(updatedRoom)
+          }
+        }).catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
   }, [room.id])
 
   const handleCopy = async () => {

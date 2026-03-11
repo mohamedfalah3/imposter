@@ -348,6 +348,18 @@ export function subscribeToRoom(roomId, callback) {
   }
 }
 
+// Fetch room by ID (for reconnection after page reload / tab switch)
+export async function fetchRoom(roomId) {
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('*')
+    .eq('id', roomId)
+    .single()
+
+  if (error) throw error
+  return data
+}
+
 // Remove player from room
 export async function leaveRoom(roomId, playerId) {
   const { data: room, error: fetchError } = await supabase

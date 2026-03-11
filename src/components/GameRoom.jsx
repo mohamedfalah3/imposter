@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { subscribeToRoom, startVoting, castVote, newRound, submitWord, resetGame } from '../gameLogic'
+import { subscribeToRoom, startVoting, castVote, newRound, submitWord, resetGame, fetchRoom } from '../gameLogic'
 
 export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackToLobby }) {
   const [room, setRoom] = useState(initialRoom)
@@ -17,6 +17,9 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
   const autoVotedRef = useRef(false)
   const autoNextRef = useRef(false)
   const [nextRoundCountdown, setNextRoundCountdown] = useState(null)
+  // Deadline refs — track real wall-clock deadlines so background tabs don't drift
+  const turnDeadlineRef = useRef(null)
+  const voteDeadlineRef = useRef(null)
 
   const settings = room.settings || { imposters: 1, rounds: 3, turnTime: 30, voteTime: 60, mode: 'classic' }
   const turnTime = settings.turnTime ?? 30
@@ -48,21 +51,37 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
     return unsubscribe
   }, [room.id])
 
-  // Reset timer when turn changes
+  // Re-fetch room state when tab becomes visible (handles background disconnects)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchRoom(room.id).then(updatedRoom => {
+          if (updatedRoom.status === 'waiting') {
+            onBackToLobby(updatedRoom)
+          } else {
+            setRoom(updatedRoom)
+          }
+        }).catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [room.id])
+
+  // Reset timer when turn changes — uses wall-clock deadline to survive background throttling
   useEffect(() => {
     if (room.status !== 'playing') return
+    turnDeadlineRef.current = Date.now() + turnTime * 1000
     setTimeLeft(turnTime)
     setMyWordInput('')
     autoSubmittedRef.current = false
     if (timerRef.current) clearInterval(timerRef.current)
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timerRef.current)
-          return 0
-        }
-        return prev - 1
-      })
+      const remaining = Math.max(0, Math.ceil((turnDeadlineRef.current - Date.now()) / 1000))
+      setTimeLeft(remaining)
+      if (remaining <= 0) {
+        clearInterval(timerRef.current)
+      }
     }, 1000)
     return () => clearInterval(timerRef.current)
   }, [room.current_turn_index, room.round, room.status])
@@ -111,20 +130,20 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
     setError('')
   }, [room.status, room.current_turn_index, room.round])
 
-  // Vote timer — eliminated players don't vote
+  // Vote timer — eliminated players don't vote — uses wall-clock deadline
   useEffect(() => {
     if (room.status !== 'voting' || hasVoted || isEliminated) {
       if (voteTimerRef.current) clearInterval(voteTimerRef.current)
       return
     }
     autoVotedRef.current = false
+    voteDeadlineRef.current = Date.now() + voteTime * 1000
     setVoteTimeLeft(voteTime)
     if (voteTimerRef.current) clearInterval(voteTimerRef.current)
     voteTimerRef.current = setInterval(() => {
-      setVoteTimeLeft(prev => {
-        if (prev <= 1) { clearInterval(voteTimerRef.current); return 0 }
-        return prev - 1
-      })
+      const remaining = Math.max(0, Math.ceil((voteDeadlineRef.current - Date.now()) / 1000))
+      setVoteTimeLeft(remaining)
+      if (remaining <= 0) { clearInterval(voteTimerRef.current) }
     }, 1000)
     return () => clearInterval(voteTimerRef.current)
   }, [room.status, hasVoted])
@@ -318,6 +337,14 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
               >
                 {loading ? '...' : 'Submit ✓'}
               </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => { autoSubmittedRef.current = true; submitWord(room.id, playerId, '-').catch(() => {}) }}
+                disabled={loading}
+                title="Skip your turn"
+              >
+                Pass
+              </button>
             </div>
           </div>
         )}
@@ -353,7 +380,7 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
                     {isOut ? (
                       <span className="player-card-waiting">eliminated</span>
                     ) : sub ? (
-                      <span className="player-word-chip">{sub}</span>
+                      <span className="player-word-chip">{sub === '-' ? 'passed' : sub}</span>
                     ) : isCurrent ? (
                       <span className="player-card-typing">typing...</span>
                     ) : (
@@ -421,7 +448,7 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
                           </div>
                           <div className="player-card-name">{player.name}</div>
                           <div className="player-card-status">
-                            <span className="player-word-chip">{sub || '-'}</span>
+                            <span className="player-word-chip">{(!sub || sub === '-') ? 'passed' : sub}</span>
                           </div>
                         </div>
                       )
@@ -444,7 +471,7 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
                       </div>
                       <div className="player-card-name">{player.name}</div>
                       <div className="player-card-status">
-                        <span className="player-word-chip">{sub || '-'}</span>
+                        <span className="player-word-chip">{(!sub || sub === '-') ? 'passed' : sub}</span>
                       </div>
                     </div>
                   )
