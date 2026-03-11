@@ -540,6 +540,86 @@ body {
   color: #0c0c12;
 }
 .setting-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ─── MODE TOGGLE ────────────────────────────────────── */
+.mode-toggle {
+  display: flex;
+  gap: 6px;
+  background: var(--bg-3);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  border: 1px solid var(--line-light);
+}
+.mode-btn {
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--grey-2);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+  white-space: nowrap;
+}
+.mode-btn:hover { color: var(--white); }
+.mode-btn-active {
+  background: var(--gold);
+  color: #0c0c12;
+}
+
+/* ─── QUICK MODE BADGE ───────────────────────────────── */
+.quick-mode-badge {
+  background: rgba(255, 200, 0, 0.12);
+  border: 1px solid rgba(255, 200, 0, 0.35);
+  color: #ffe066;
+  border-radius: 30px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+/* ─── QUICK MODE WORDS SUMMARY (voting phase) ────────── */
+.quick-words-summary {
+  display: flex;
+  gap: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-light);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  overflow-x: auto;
+}
+.quick-round-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 130px;
+}
+.quick-round-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--gold-light);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.quick-word-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.quick-word-name {
+  font-size: 0.8rem;
+  color: var(--grey-1);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60px;
+}
 .setting-value {
   font-size: 1.05rem;
   font-weight: 800;

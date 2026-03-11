@@ -6,7 +6,7 @@ export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeav
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [settings, setSettings] = useState(initialRoom.settings || { imposters: 1, rounds: 3, turnTime: 30, voteTime: 60 })
+  const [settings, setSettings] = useState(initialRoom.settings || { imposters: 1, rounds: 3, turnTime: 30, voteTime: 60, mode: 'classic' })
 
   const isHost = room.players.find(p => p.id === playerId)?.isHost
   const maxImposters = Math.max(1, Math.floor(room.players.length / 2))
@@ -63,6 +63,16 @@ export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeav
     try { await updateSettings(room.id, newSettings) } catch {}
   }
 
+  const handleModeChange = async (newMode) => {
+    const newSettings = {
+      ...settings,
+      mode: newMode,
+      rounds: newMode === 'quick' ? 2 : (settings.rounds === 2 ? 3 : settings.rounds),
+    }
+    setSettings(newSettings)
+    try { await updateSettings(room.id, newSettings) } catch {}
+  }
+
   return (
     <div className="lobby-container">
       <div className="room-header">
@@ -91,6 +101,32 @@ export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeav
       {/* Settings Panel */}
       <div className="settings-section">
         <h3>⚙️ Game Settings</h3>
+
+        {/* Mode Selection */}
+        <div className="setting-row">
+          <span className="setting-label">🎮 Mode</span>
+          {isHost ? (
+            <div className="mode-toggle">
+              <button
+                className={`mode-btn ${settings.mode !== 'quick' ? 'mode-btn-active' : ''}`}
+                onClick={() => handleModeChange('classic')}
+              >
+                Classic
+              </button>
+              <button
+                className={`mode-btn ${settings.mode === 'quick' ? 'mode-btn-active' : ''}`}
+                onClick={() => handleModeChange('quick')}
+              >
+                Quick ⚡
+              </button>
+            </div>
+          ) : (
+            <span className="setting-value-display">
+              {settings.mode === 'quick' ? 'Quick ⚡' : 'Classic'}
+            </span>
+          )}
+        </div>
+
         <div className="setting-row">
           <span className="setting-label">🕵️ Imposters</span>
           {isHost ? (
@@ -105,9 +141,9 @@ export default function Lobby({ room: initialRoom, playerId, onGameStart, onLeav
           <span className="setting-label">🔁 Rounds</span>
           {isHost ? (
             <div className="setting-controls">
-              <button className="setting-btn" onClick={() => handleSettingChange('rounds', settings.rounds - 1)} disabled={settings.rounds <= 1}>−</button>
+              <button className="setting-btn" onClick={() => handleSettingChange('rounds', settings.rounds - 1)} disabled={settings.rounds <= 1 || settings.mode === 'quick'}>−</button>
               <span className="setting-value">{settings.rounds}</span>
-              <button className="setting-btn" onClick={() => handleSettingChange('rounds', settings.rounds + 1)} disabled={settings.rounds >= 10}>+</button>
+              <button className="setting-btn" onClick={() => handleSettingChange('rounds', settings.rounds + 1)} disabled={settings.rounds >= 10 || settings.mode === 'quick'}>+</button>
             </div>
           ) : <span className="setting-value-display">{settings.rounds}</span>}
         </div>

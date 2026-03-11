@@ -18,10 +18,11 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
   const autoNextRef = useRef(false)
   const [nextRoundCountdown, setNextRoundCountdown] = useState(null)
 
-  const settings = room.settings || { imposters: 1, rounds: 3, turnTime: 30, voteTime: 60 }
+  const settings = room.settings || { imposters: 1, rounds: 3, turnTime: 30, voteTime: 60, mode: 'classic' }
   const turnTime = settings.turnTime ?? 30
   const voteTime = settings.voteTime ?? 60
   const maxRounds = settings.rounds ?? 3
+  const isQuickMode = (settings.mode || 'classic') === 'quick'
   const imposterIds = room.imposter_ids?.length ? room.imposter_ids : (room.imposter_id ? [room.imposter_id] : [])
 
   const isHost = room.players.find(p => p.id === playerId)?.isHost
@@ -33,7 +34,9 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
   const currentTurnIndex = room.current_turn_index ?? 0
   const currentTurnPlayer = room.players[currentTurnIndex]
   const isMyTurn = !isEliminated && currentTurnPlayer?.id === playerId
-  const mySubmission = room.word_submissions?.[playerId]
+  // In quick mode, submission keys are prefixed with the round number
+  const mySubmissionKey = isQuickMode ? `r${room.round}_${playerId}` : playerId
+  const mySubmission = room.word_submissions?.[mySubmissionKey]
 
   useEffect(() => {
     const unsubscribe = subscribeToRoom(room.id, (updatedRoom) => {
@@ -73,28 +76,40 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
   }, [timeLeft, isMyTurn, mySubmission])
 
   // Review countdown — shows all submissions for 5s before voting
+  // Host auto-transitions to voting via setTimeout (avoids stale-state race)
+  const reviewTransitionRef = useRef(null)
   useEffect(() => {
     if (room.status !== 'reviewing') {
       if (reviewTimerRef.current) clearInterval(reviewTimerRef.current)
+      if (reviewTransitionRef.current) clearTimeout(reviewTransitionRef.current)
       return
     }
     setReviewTimeLeft(5)
     if (reviewTimerRef.current) clearInterval(reviewTimerRef.current)
+    if (reviewTransitionRef.current) clearTimeout(reviewTransitionRef.current)
     reviewTimerRef.current = setInterval(() => {
       setReviewTimeLeft(prev => {
         if (prev <= 1) { clearInterval(reviewTimerRef.current); return 0 }
         return prev - 1
       })
     }, 1000)
-    return () => clearInterval(reviewTimerRef.current)
+    // Host transitions to voting after 5s
+    if (isHost) {
+      reviewTransitionRef.current = setTimeout(() => {
+        startVoting(room.id).catch(() => {})
+      }, 5000)
+    }
+    return () => {
+      clearInterval(reviewTimerRef.current)
+      if (reviewTransitionRef.current) clearTimeout(reviewTransitionRef.current)
+    }
   }, [room.status])
 
-  // Host triggers voting after review countdown
+  // Reset loading & error when game phase, turn, or round changes
   useEffect(() => {
-    if (reviewTimeLeft === 0 && room.status === 'reviewing' && isHost) {
-      startVoting(room.id).catch(() => {})
-    }
-  }, [reviewTimeLeft, room.status, isHost])
+    setLoading(false)
+    setError('')
+  }, [room.status, room.current_turn_index, room.round])
 
   // Vote timer — eliminated players don't vote
   useEffect(() => {
@@ -163,20 +178,22 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
     setLoading(true)
     try {
       await submitWord(room.id, playerId, myWordInput.trim())
+      // Don't clear loading — subscription will update the UI
     } catch (err) {
       setError(err.message)
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleVote = async (voteTarget) => {
     setLoading(true)
     try {
       await castVote(room.id, playerId, voteTarget)
+      // Don't clear loading — subscription will update the UI
     } catch (err) {
       setError(err.message)
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleNewRound = async () => {
@@ -226,12 +243,15 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
 
   // PLAYING PHASE
   if (room.status === 'playing') {
-    const submittedCount = Object.keys(room.word_submissions || {}).length
+    const submittedCount = isQuickMode
+      ? Object.keys(room.word_submissions || {}).filter(k => k.startsWith(`r${room.round}_`)).length
+      : Object.keys(room.word_submissions || {}).length
 
     return (
       <div className="game-container">
         <div className="game-header">
-          <div className="round-badge">Round {room.round}</div>
+          <div className="round-badge">Round {room.round}{isQuickMode ? ` / 2` : ``}</div>
+          {isQuickMode && <div className="quick-mode-badge">⚡ Quick Mode</div>}
         </div>
 
         {/* Word card — always visible */}
@@ -312,7 +332,9 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
           <h3>Players ({submittedCount}/{activePlayers.length} submitted)</h3>
           <div className="player-cards-grid">
             {room.players.map((player, i) => {
-              const sub = room.word_submissions?.[player.id]
+              const sub = isQuickMode
+                ? room.word_submissions?.[`r${room.round}_${player.id}`]
+                : room.word_submissions?.[player.id]
               const isCurrent = i === currentTurnIndex
               const isOut = eliminatedPlayers.includes(player.id)
               return (
@@ -353,8 +375,9 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
     return (
       <div className="game-container">
         <div className="game-header">
-          <div className="round-badge">Round {room.round}</div>
+          <div className="round-badge">{isQuickMode ? 'Rounds 1 & 2' : `Round ${room.round}`}</div>
           <div className="round-badge" style={{ background: '#c8860a' }}>All Submitted!</div>
+          {isQuickMode && <div className="quick-mode-badge">⚡ Quick Mode</div>}
         </div>
 
         <div className={`word-card ${isImposter ? 'imposter-card' : 'normal-card'}`}>
@@ -380,24 +403,53 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
         <p style={{ textAlign: 'center', color: '#aaa', marginBottom: '12px', fontSize: '0.9rem' }}>Voting starts in {reviewTimeLeft}s...</p>
 
         <div className="players-list-game">
-          <h3>Everyone's words</h3>
-          <div className="player-cards-grid">
-            {room.players.map((player, i) => {
-              const sub = room.word_submissions?.[player.id]
-              return (
-                <div key={player.id} className={`player-card submitted-card ${player.id === playerId ? 'is-me' : ''}`}>
-                  <div className="player-card-top">
-                    <span className="player-card-num">{i + 1}</span>
-                    {player.id === playerId && <span className="me-badge">You</span>}
-                  </div>
-                  <div className="player-card-name">{player.name}</div>
-                  <div className="player-card-status">
-                    <span className="player-word-chip">{sub || '-'}</span>
+          {isQuickMode ? (
+            <>
+              {[1, 2].map(rnd => (
+                <div key={rnd}>
+                  <h3 style={{ marginBottom: '8px' }}>Round {rnd} words</h3>
+                  <div className="player-cards-grid">
+                    {room.players.map((player, i) => {
+                      const sub = room.word_submissions?.[`r${rnd}_${player.id}`]
+                      return (
+                        <div key={player.id} className={`player-card submitted-card ${player.id === playerId ? 'is-me' : ''}`}>
+                          <div className="player-card-top">
+                            <span className="player-card-num">{i + 1}</span>
+                            {player.id === playerId && <span className="me-badge">You</span>}
+                          </div>
+                          <div className="player-card-name">{player.name}</div>
+                          <div className="player-card-status">
+                            <span className="player-word-chip">{sub || '-'}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
-              )
-            })}
-          </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <h3>Everyone's words</h3>
+              <div className="player-cards-grid">
+                {room.players.map((player, i) => {
+                  const sub = room.word_submissions?.[player.id]
+                  return (
+                    <div key={player.id} className={`player-card submitted-card ${player.id === playerId ? 'is-me' : ''}`}>
+                      <div className="player-card-top">
+                        <span className="player-card-num">{i + 1}</span>
+                        {player.id === playerId && <span className="me-badge">You</span>}
+                      </div>
+                      <div className="player-card-name">{player.name}</div>
+                      <div className="player-card-status">
+                        <span className="player-word-chip">{sub || '-'}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
         </div>
       </div>
     )
@@ -409,9 +461,27 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
       <div className="game-container">
         <div className="game-header">
           <div className="round-badge">🗳️ Voting</div>
+          {isQuickMode && <div className="quick-mode-badge">⚡ Quick Mode</div>}
         </div>
 
         <h3 className="vote-title">Who do you think is the imposter?</h3>
+
+        {/* Quick mode: show both rounds' words for reference */}
+        {isQuickMode && (
+          <div className="quick-words-summary">
+            {[1, 2].map(rnd => (
+              <div key={rnd} className="quick-round-col">
+                <div className="quick-round-label">Round {rnd}</div>
+                {room.players.filter(p => !eliminatedPlayers.includes(p.id)).map(player => (
+                  <div key={player.id} className="quick-word-row">
+                    <span className="quick-word-name">{player.id === playerId ? 'You' : player.name}</span>
+                    <span className="player-word-chip">{room.word_submissions?.[`r${rnd}_${player.id}`] || '-'}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         {!hasVoted && (
           <div className={`timer-circle ${voteTimeLeft <= 10 ? 'timer-urgent' : ''}`}>
@@ -495,8 +565,9 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
     return (
       <div className="game-container">
         <div className="game-header">
-          <div className="round-badge">Round {room.round} / {maxRounds}</div>
+          <div className="round-badge">{isQuickMode ? 'Quick Mode' : `Round ${room.round} / ${maxRounds}`}</div>
           {isGameOver && <div className="category-badge">Game Over</div>}
+          {isQuickMode && <div className="quick-mode-badge">⚡ Quick Mode</div>}
         </div>
 
         {isGameOver ? (

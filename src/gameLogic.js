@@ -39,7 +39,7 @@ export async function createRoom(hostName) {
     votes: {},
     round: 0,
     eliminated_players: [],
-    settings: { imposters: 1, rounds: 3, turnTime: 30, voteTime: 60 }
+    settings: { imposters: 1, rounds: 3, turnTime: 30, voteTime: 60, mode: 'classic' }
   }).select().single()
 
   if (error) throw error
@@ -127,10 +127,20 @@ export async function submitWord(roomId, playerId, wordInput) {
 
   if (fetchError) throw fetchError
 
-  const submissions = { ...(room.word_submissions || {}), [playerId]: wordInput }
+  const mode = room.settings?.mode || 'classic'
+  const isQuick = mode === 'quick'
+
+  // In quick mode we store submissions with a round prefix so both rounds are kept
+  const submissionKey = isQuick ? `r${room.round}_${playerId}` : playerId
+  const submissions = { ...(room.word_submissions || {}), [submissionKey]: wordInput }
+
   const eliminated = room.eliminated_players || []
   const activePlayers = room.players.filter(p => !eliminated.includes(p.id))
-  const allSubmitted = activePlayers.every(p => submissions[p.id])
+
+  // Check whether every active player submitted for the CURRENT round
+  const allSubmitted = isQuick
+    ? activePlayers.every(p => submissions[`r${room.round}_${p.id}`])
+    : activePlayers.every(p => submissions[p.id])
 
   // Advance turn index, skipping eliminated players
   let nextIndex = (room.current_turn_index || 0) + 1
@@ -138,13 +148,33 @@ export async function submitWord(roomId, playerId, wordInput) {
     nextIndex++
   }
 
+  // In quick mode: round 1 done → auto-start round 2 (skip voting)
+  // In quick mode: round 2 done → go to reviewing → voting as usual
+  let newStatus = allSubmitted ? 'reviewing' : 'playing'
+  let newRound = room.round
+  let newTurnIndex = nextIndex
+
+  if (allSubmitted && isQuick && room.round < 2) {
+    newStatus = 'playing'
+    newRound = room.round + 1
+    // Reset turn to first non-eliminated player
+    let startIdx = 0
+    while (startIdx < room.players.length && eliminated.includes(room.players[startIdx]?.id)) {
+      startIdx++
+    }
+    newTurnIndex = startIdx
+  }
+
+  const updateData = {
+    word_submissions: submissions,
+    current_turn_index: newTurnIndex,
+    status: newStatus,
+  }
+  if (newRound !== room.round) updateData.round = newRound
+
   const { data, error } = await supabase
     .from('rooms')
-    .update({
-      word_submissions: submissions,
-      current_turn_index: nextIndex,
-      status: allSubmitted ? 'reviewing' : 'playing',
-    })
+    .update(updateData)
     .eq('id', roomId)
     .select()
     .single()
