@@ -95,6 +95,13 @@ export async function startGame(roomId) {
   // Shuffle players so turn order is random (not always starting from host)
   const shuffledPlayers = [...room.players].sort(() => Math.random() - 0.5)
 
+  // Find first non-imposter to go first
+  let startIndex = 0
+  while (startIndex < shuffledPlayers.length && imposterIds.includes(shuffledPlayers[startIndex].id)) {
+    startIndex++
+  }
+  if (startIndex >= shuffledPlayers.length) startIndex = 0 // fallback (all imposters, shouldn't happen)
+
   const { data, error } = await supabase
     .from('rooms')
     .update({
@@ -106,7 +113,7 @@ export async function startGame(roomId) {
       category: category,
       votes: {},
       word_submissions: {},
-      current_turn_index: 0,
+      current_turn_index: startIndex,
       round: room.round + 1
     })
     .eq('id', roomId)
@@ -260,10 +267,20 @@ export async function newRound(roomId) {
   // Reshuffle players so turn order is random each round
   const shuffledPlayers = [...room.players].sort(() => Math.random() - 0.5)
 
-  // Find the first non-eliminated player index to start from
+  // Find the first non-eliminated, non-imposter player index to start from
   let startIndex = 0
-  while (startIndex < shuffledPlayers.length && eliminated.includes(shuffledPlayers[startIndex].id)) {
+  while (
+    startIndex < shuffledPlayers.length &&
+    (eliminated.includes(shuffledPlayers[startIndex].id) || rImposterIds.includes(shuffledPlayers[startIndex].id))
+  ) {
     startIndex++
+  }
+  // Fallback: if all non-eliminated are imposters, just skip eliminated only
+  if (startIndex >= shuffledPlayers.length) {
+    startIndex = 0
+    while (startIndex < shuffledPlayers.length && eliminated.includes(shuffledPlayers[startIndex].id)) {
+      startIndex++
+    }
   }
 
   const { data, error } = await supabase

@@ -189,7 +189,7 @@ export default function GameRoom({ room: initialRoom, playerId, onLeave, onBackT
     setLoading(true)
     try {
       await castVote(room.id, playerId, voteTarget)
-      // Don't clear loading — subscription will update the UI
+      setLoading(false)
     } catch (err) {
       setError(err.message)
       setLoading(false)
